@@ -1,13 +1,28 @@
-# progress.py
 import time
 import math
+import asyncio
 from pyrogram.errors import FloodWait
 
-# --- Progress Callback for Pyrogram ---
+def humanbytes(size):
+    """Convert bytes to human-readable format"""
+    if not size:
+        return "0 B"
+    power = 1024
+    t_n = 0
+    power_dict = {0: " ", 1: "K", 2: "M", 3: "G", 4: "T"}
+    while size > power:
+        size /= power
+        t_n += 1
+    return "{:.2f} {}B".format(size, power_dict[t_n])
+
+def time_formatter(seconds: int) -> str:
+    """Convert seconds to HH:MM:SS format"""
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
 async def progress_for_pyrogram(current, total, ud_type, message, start_time):
-    """
-    Updates a Telegram message to show download/upload progress.
-    """
+    """Updates a Telegram message to show download/upload progress"""
     now = time.time()
     diff = now - start_time
     if diff < 1:  # Update at most once per second
@@ -35,15 +50,12 @@ async def progress_for_pyrogram(current, total, ud_type, message, start_time):
     try:
         await message.edit_text(text=progress_text)
     except FloodWait as e:
-        time.sleep(e.value)
+        await asyncio.sleep(e.value)
     except Exception:
         pass
 
-# --- Progress Callback Class for Boto3 (Wasabi) ---
 class Boto3Progress:
-    """
-    A class to handle progress reporting for Boto3 uploads to Telegram.
-    """
+    """A class to handle progress reporting for Boto3 uploads to Telegram"""
     def __init__(self, message, file_size, loop):
         self._message = message
         self._size = file_size
@@ -81,21 +93,3 @@ class Boto3Progress:
             self._message.edit_text(progress_text), self._loop
         )
         self._last_update_time = now
-
-# --- Helper Functions ---
-def humanbytes(size):
-    if not size:
-        return "0 B"
-    power = 1024
-    t_n = 0
-    power_dict = {0: " ", 1: "K", 2: "M", 3: "G", 4: "T"}
-    while size > power:
-        size /= power
-        t_n += 1
-    return "{:.2f} {}B".format(size, power_dict[t_n])
-
-def time_formatter(seconds: int) -> str:
-    minutes, seconds = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
