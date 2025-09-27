@@ -4,58 +4,67 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Config:
-    # Telegram API Configuration - Get these from https://my.telegram.org
-    API_ID = 1234567  # Your API ID (integer)
-    API_HASH = "your_telegram_api_hash_here"  # Your API Hash
-    BOT_TOKEN = "1234567890:your_bot_token_here"  # Your Bot Token from @BotFather
+    # Telegram Configuration
+    API_ID = int(os.getenv("API_ID", 0))
+    API_HASH = os.getenv("API_HASH", "")
+    BOT_TOKEN = os.getenv("BOT_TOKEN", "")
     
-    # Wasabi S3 Configuration
-    WASABI_ACCESS_KEY = "your_wasabi_access_key_here"  # Wasabi Access Key
-    WASABI_SECRET_KEY = "your_wasabi_secret_key_here"  # Wasabi Secret Key
-    WASABI_BUCKET = "your_bucket_name_here"  # Your Wasabi bucket name
-    WASABI_REGION = "us-east-1"  # Wasabi region (us-east-1, us-central-1, etc.)
+    # Primary Wasabi Configuration
+    WASABI_ACCESS_KEY = os.getenv("WASABI_ACCESS_KEY")
+    WASABI_SECRET_KEY = os.getenv("WASABI_SECRET_KEY")
+    WASABI_BUCKET = os.getenv("WASABI_BUCKET")
+    WASABI_REGION = os.getenv("WASABI_REGION", "us-east-1")
     
-    # Optional: Download directory
-    DOWNLOAD_DIR = "./downloads"
+    # Optional Settings
+    MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 10 * 1024 * 1024 * 1024))  # 10GB
+    MAX_REQUESTS_PER_MINUTE = int(os.getenv("MAX_REQUESTS_PER_MINUTE", 30))
     
-    # Optional: Maximum file size (in bytes) - 10GB default
-    MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024
+    # Authorization (optional - leave empty for public bot)
+    AUTHORIZED_USERS = []
+    auth_users = os.getenv("AUTHORIZED_USERS", "")
+    if auth_users:
+        AUTHORIZED_USERS = [int(user_id.strip()) for user_id in auth_users.split(",") if user_id.strip()]
     
-    # Optional: Presigned URL expiration (in seconds) - 7 days default
-    URL_EXPIRATION = 604800
+    # Backup Accounts Configuration
+    @staticmethod
+    def get_backup_accounts():
+        backups = []
+        for i in range(1, 6):  # Support up to 5 backups
+            access_key = os.getenv(f"WASABI_BACKUP_{i}_ACCESS_KEY")
+            secret_key = os.getenv(f"WASABI_BACKUP_{i}_SECRET_KEY")
+            
+            if access_key and secret_key:
+                backup_config = {
+                    'name': f'Backup {i}',
+                    'access_key': access_key,
+                    'secret_key': secret_key,
+                    'bucket': os.getenv(f"WASABI_BACKUP_{i}_BUCKET", Config.WASABI_BUCKET),
+                    'region': os.getenv(f"WASABI_BACKUP_{i}_REGION", Config.WASABI_REGION)
+                }
+                backups.append(backup_config)
+        
+        return backups
+    
+    # Validation
+    @staticmethod
+    def validate():
+        required_vars = [
+            'API_ID', 'API_HASH', 'BOT_TOKEN',
+            'WASABI_ACCESS_KEY', 'WASABI_SECRET_KEY', 'WASABI_BUCKET'
+        ]
+        
+        missing = [var for var in required_vars if not getattr(Config, var, None)]
+        if missing:
+            raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+        
+        if Config.API_ID == 0:
+            raise ValueError("API_ID must be set and valid")
+        
+        # Check if we have at least primary Wasabi credentials
+        if not all([Config.WASABI_ACCESS_KEY, Config.WASABI_SECRET_KEY, Config.WASABI_BUCKET]):
+            raise ValueError("Primary Wasabi credentials are required")
+        
+        return True
 
-def load_config():
-    """Load configuration from environment variables if available"""
-    config = Config()
-    
-    # Telegram Config
-    if os.getenv('API_ID'):
-        config.API_ID = int(os.getenv('API_ID'))
-    if os.getenv('API_HASH'):
-        config.API_HASH = os.getenv('API_HASH')
-    if os.getenv('BOT_TOKEN'):
-        config.BOT_TOKEN = os.getenv('BOT_TOKEN')
-    
-    # Wasabi Config
-    if os.getenv('WASABI_ACCESS_KEY'):
-        config.WASABI_ACCESS_KEY = os.getenv('WASABI_ACCESS_KEY')
-    if os.getenv('WASABI_SECRET_KEY'):
-        config.WASABI_SECRET_KEY = os.getenv('WASABI_SECRET_KEY')
-    if os.getenv('WASABI_BUCKET'):
-        config.WASABI_BUCKET = os.getenv('WASABI_BUCKET')
-    if os.getenv('WASABI_REGION'):
-        config.WASABI_REGION = os.getenv('WASABI_REGION')
-    
-    # Optional settings
-    if os.getenv('MAX_FILE_SIZE'):
-        config.MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE'))
-    if os.getenv('URL_EXPIRATION'):
-        config.URL_EXPIRATION = int(os.getenv('URL_EXPIRATION'))
-    
-    return config
-
-# Create config instance
-try:
-    config = load_config()
-except:
-    config = Config()
+# Validate configuration on import
+Config.validate()
