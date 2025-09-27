@@ -81,8 +81,13 @@ def get_user_folder(user_id):
 
 def humanbytes(size):
     """Convert bytes to human readable format"""
-    if not size:
+    if not size or size == 0:
         return "0 B"
+    try:
+        size = float(size)
+    except (TypeError, ValueError):
+        return "Unknown"
+        
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if size < 1024.0:
             return f"{size:.2f} {unit}"
@@ -102,7 +107,7 @@ async def safe_edit_message(message, text, parse_mode=ParseMode.MARKDOWN):
         except:
             return message
 
-async def upload_to_backups(file_path, file_name, original_size, status_msg):
+async def upload_to_backups(file_path, file_name, file_size, status_msg):
     """Upload file to all backup accounts"""
     backup_results = []
     
@@ -110,7 +115,7 @@ async def upload_to_backups(file_path, file_name, original_size, status_msg):
         try:
             await safe_edit_message(
                 status_msg, 
-                f"🔄 Uploading to {backup['name']}..."
+                f"🔄 Uploading to {backup['name']}... ({humanbytes(file_size)})"
             )
             
             # Upload to backup account
@@ -244,18 +249,40 @@ async def show_backups(client, message: Message):
 
 @app.on_message(filters.document | filters.video | filters.audio | filters.photo)
 async def upload_file(client, message: Message):
-    media = message.document or message.video or message.audio or message.photo
+    # Get the media object safely
+    media = None
+    file_size = 0
+    
+    if message.document:
+        media = message.document
+        file_size = media.file_size
+    elif message.video:
+        media = message.video  
+        file_size = media.file_size
+    elif message.audio:
+        media = message.audio
+        file_size = media.file_size
+    elif message.photo:
+        # Photos are different - they're in an array
+        media = message.photo[-1]  # Get the largest version
+        file_size = media.file_size if hasattr(media, 'file_size') else 0
+    
     if not media:
         await message.reply_text("Unsupported file type.")
         return
 
     status_msg = await message.reply_text("📤 Downloading file from Telegram...")
+    file_path = None
     
     try:
         # Download from Telegram
         file_path = await message.download()
+        if not file_path:
+            await safe_edit_message(status_msg, "❌ Failed to download file from Telegram.")
+            return
+            
         file_name = f"{get_user_folder(message.from_user.id)}/{os.path.basename(file_path)}"
-        original_name = os.path.basename(file_path)
+        original_name = getattr(media, 'file_name', None) or os.path.basename(file_path)
         
         # Upload to primary account
         await safe_edit_message(status_msg, "☁️ Uploading to primary storage...")
@@ -269,8 +296,7 @@ async def upload_file(client, message: Message):
         # Upload to backup accounts
         backup_results = []
         if backup_clients:
-            backup_results = await upload_to_backups(file_path, file_name, 
-                                                   media.file_size, status_msg)
+            backup_results = await upload_to_backups(file_path, file_name, file_size, status_msg)
         
         # Generate shareable link from primary
         presigned_url = primary_s3.generate_presigned_url(
@@ -278,8 +304,6 @@ async def upload_file(client, message: Message):
             Params={'Bucket': WASABI_BUCKET, 'Key': file_name},
             ExpiresIn=86400
         )
-        
-        file_size = media.file_size if hasattr(media, 'file_size') else "Unknown"
         
         # Create result message
         result_text = (
@@ -301,7 +325,7 @@ async def upload_file(client, message: Message):
     except Exception as e:
         await safe_edit_message(status_msg, f"❌ **Error:** {str(e)}")
     finally:
-        if os.path.exists(file_path):
+        if file_path and os.path.exists(file_path):
             os.remove(file_path)
 
 @app.on_message(filters.command("download"))
@@ -311,6 +335,10 @@ async def download_file(client, message: Message):
         return
 
     file_name = " ".join(message.command[1:])
+    if not file_name or file_name.strip() == "":
+        await message.reply_text("❌ Please provide a valid filename.")
+        return
+        
     user_file_name = f"{get_user_folder(message.from_user.id)}/{file_name}"
     local_path = f"download_{file_name}"
     
@@ -428,6 +456,10 @@ async def sync_command(client, message: Message):
         return
 
     file_name = " ".join(message.command[1:])
+    if not file_name or file_name.strip() == "":
+        await message.reply_text("❌ Please provide a valid filename.")
+        return
+        
     user_file_name = f"{get_user_folder(message.from_user.id)}/{file_name}"
     
     status_msg = await message.reply_text(f"🔄 Syncing {file_name} to backups...")
@@ -461,6 +493,10 @@ async def delete_file(client, message: Message):
         return
 
     file_name = " ".join(message.command[1:-1] if len(message.command) > 2 else message.command[1:])
+    if not file_name or file_name.strip() == "":
+        await message.reply_text("❌ Please provide a valid filename.")
+        return
+        
     account_name = message.command[-1] if len(message.command) > 2 else "primary"
     
     user_file_name = f"{get_user_folder(message.from_user.id)}/{file_name}"
@@ -522,7 +558,6 @@ async def help_command(client, message: Message):
 - `primary` - Main storage account
 - `backup1`, `backup2`, etc. - Backup accounts
 - `all` - For deleting from all accounts
-
 **Features:**
 - Automatic multi-account backup on upload
 - Redundant storage across multiple Wasabi accounts
@@ -534,8 +569,19 @@ async def help_command(client, message: Message):
     await message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
 if __name__ == "__main__":
-    print("Starting Wasabi Storage Bot with Backup Support...")
-    print(f"Primary account: {WASABI_BUCKET} ({WASABI_REGION})")
-    print(f"Backup accounts: {len(backup_clients)} configured")
-    
-    app.run()
+    try:
+        # Validate environment variables
+        required_vars = ["API_ID", "API_HASH", "BOT_TOKEN", "WASABI_ACCESS_KEY", "WASABI_SECRET_KEY", "WASABI_BUCKET", "WASABI_REGION"]
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        
+        if missing_vars:
+            print(f"❌ Missing required environment variables: {', '.join(missing_vars)}")
+            exit(1)
+            
+        print("✅ Starting Wasabi Storage Bot with Backup Support...")
+        print(f"📦 Primary account: {WASABI_BUCKET} ({WASABI_REGION})")
+        print(f"🔒 Backup accounts: {len(backup_clients)} configured")
+       
+        app.run()
+    except Exception as e:
+        print(f"❌ Failed to start bot: {e}")
