@@ -43,13 +43,34 @@ def humanbytes(size):
         size /= 1024.0
     return f"{size:.2f} PB"
 
+async def safe_edit_message(message, text, parse_mode=ParseMode.MARKDOWN):
+    """Safely edit a message without causing MESSAGE_NOT_MODIFIED errors"""
+    try:
+        # Check if the content is actually different
+        if hasattr(message, 'text') and message.text == text:
+            return message  # No need to edit if content is the same
+        
+        await message.edit_text(text, parse_mode=parse_mode)
+        return message
+    except Exception as e:
+        # If editing fails, send a new message instead
+        if "MESSAGE_NOT_MODIFIED" in str(e):
+            return await message.reply_text(text, parse_mode=parse_mode)
+        else:
+            # For other errors, try to send new message
+            try:
+                return await message.reply_text(text, parse_mode=parse_mode)
+            except:
+                return message
+
 @app.on_message(filters.command("start"))
 async def start(client, message: Message):
     await message.reply_text(
         "🚀 **Wasabi Storage Bot**\n\n"
         "Send me any file to upload to Wasabi storage.\n"
         "Use `/download <filename>` to download files.\n"
-        "Use `/list` to see your files.",
+        "Use `/list` to see your files.\n"
+        "Use `/delete <filename>` to delete files.",
         parse_mode=ParseMode.MARKDOWN
     )
 
@@ -67,8 +88,9 @@ async def upload_file(client, message: Message):
         file_path = await message.download()
         file_name = f"{get_user_folder(message.from_user.id)}/{os.path.basename(file_path)}"
         
+        await safe_edit_message(status_msg, "☁️ Uploading to Wasabi...")
+        
         # Upload to Wasabi
-        await status_msg.edit_text("☁️ Uploading to Wasabi...")
         await asyncio.to_thread(
             s3_client.upload_file,
             file_path,
@@ -84,12 +106,12 @@ async def upload_file(client, message: Message):
         )
         
         file_size = media.file_size if hasattr(media, 'file_size') else "Unknown"
-        await status_msg.edit_text(
+        await safe_edit_message(
+            status_msg,
             f"✅ **Upload Complete!**\n\n"
             f"📁 **File:** `{os.path.basename(file_path)}`\n"
             f"📦 **Size:** {humanbytes(file_size)}\n"
-            f"🔗 **Link:** `{presigned_url}`",
-            parse_mode=ParseMode.MARKDOWN
+            f"🔗 **Link (24h):** `{presigned_url}`"
         )
         
         # Cleanup
@@ -97,7 +119,7 @@ async def upload_file(client, message: Message):
             os.remove(file_path)
             
     except Exception as e:
-        await status_msg.edit_text(f"❌ **Error:** {str(e)}")
+        await safe_edit_message(status_msg, f"❌ **Error:** {str(e)}")
 
 @app.on_message(filters.command("download"))
 async def download_file(client, message: Message):
@@ -112,10 +134,11 @@ async def download_file(client, message: Message):
     status_msg = await message.reply_text("🔍 Searching for file...")
     
     try:
-        # Check if file exists
-        await asyncio.to_thread(s3_client.head_object, Bucket=WASABI_BUCKET, Key=user_file_name)
+        # Check if file exists and get file size
+        meta = await asyncio.to_thread(s3_client.head_object, Bucket=WASABI_BUCKET, Key=user_file_name)
+        file_size = meta['ContentLength']
         
-        await status_msg.edit_text("📥 Downloading from Wasabi...")
+        await safe_edit_message(status_msg, f"📥 Downloading {humanbytes(file_size)} file...")
         
         # Download from Wasabi
         await asyncio.to_thread(
@@ -125,7 +148,7 @@ async def download_file(client, message: Message):
             local_path
         )
         
-        await status_msg.edit_text("📤 Uploading to Telegram...")
+        await safe_edit_message(status_msg, "📤 Uploading to Telegram...")
         
         # Send to user
         await message.reply_document(
@@ -138,11 +161,11 @@ async def download_file(client, message: Message):
     except ClientError as e:
         error_code = e.response['Error']['Code']
         if error_code == '404':
-            await status_msg.edit_text(f"❌ File not found: `{file_name}`", parse_mode=ParseMode.MARKDOWN)
+            await safe_edit_message(status_msg, f"❌ File not found: `{file_name}`")
         else:
-            await status_msg.edit_text(f"❌ Error: {error_code}")
+            await safe_edit_message(status_msg, f"❌ Error: {error_code}")
     except Exception as e:
-        await status_msg.edit_text(f"❌ Error: {str(e)}")
+        await safe_edit_message(status_msg, f"❌ Error: {str(e)}")
     finally:
         # Cleanup
         if os.path.exists(local_path):
@@ -161,22 +184,29 @@ async def list_files(client, message: Message):
         )
         
         if 'Contents' not in response:
-            await status_msg.edit_text("📂 No files found in your storage.")
+            await safe_edit_message(status_msg, "📂 No files found in your storage.")
             return
         
         files = [obj['Key'].replace(user_prefix, "") for obj in response['Contents']]
+        
+        if not files:
+            await safe_edit_message(status_msg, "📂 No files found in your storage.")
+            return
+        
         files_list = "\n".join([f"• `{file}`" for file in files[:15]])  # Show first 15 files
         
         if len(files) > 15:
             files_list += f"\n\n...and {len(files) - 15} more files"
         
-        await status_msg.edit_text(
-            f"📁 **Your Files:**\n\n{files_list}",
+        # Always send as new message to avoid edit conflicts
+        await status_msg.delete()
+        await message.reply_text(
+            f"📁 **Your Files ({len(files)} total):**\n\n{files_list}",
             parse_mode=ParseMode.MARKDOWN
         )
         
     except Exception as e:
-        await status_msg.edit_text(f"❌ Error listing files: {str(e)}")
+        await safe_edit_message(status_msg, f"❌ Error listing files: {str(e)}")
 
 @app.on_message(filters.command("delete"))
 async def delete_file(client, message: Message):
@@ -188,6 +218,10 @@ async def delete_file(client, message: Message):
     user_file_name = f"{get_user_folder(message.from_user.id)}/{file_name}"
     
     try:
+        # Check if file exists first
+        await asyncio.to_thread(s3_client.head_object, Bucket=WASABI_BUCKET, Key=user_file_name)
+        
+        # Delete the file
         await asyncio.to_thread(
             s3_client.delete_object,
             Bucket=WASABI_BUCKET,
@@ -196,8 +230,34 @@ async def delete_file(client, message: Message):
         
         await message.reply_text(f"✅ Deleted: `{file_name}`", parse_mode=ParseMode.MARKDOWN)
         
+    except ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '404':
+            await message.reply_text(f"❌ File not found: `{file_name}`", parse_mode=ParseMode.MARKDOWN)
+        else:
+            await message.reply_text(f"❌ Error: {error_code}")
     except Exception as e:
         await message.reply_text(f"❌ Error deleting file: {str(e)}")
+
+@app.on_message(filters.command("help"))
+async def help_command(client, message: Message):
+    help_text = """
+🤖 **Wasabi Storage Bot Commands:**
+
+📤 **Upload:** Just send any file (document, video, audio, photo)
+📥 **Download:** `/download filename`
+📂 **List Files:** `/list`
+🗑️ **Delete File:** `/delete filename`
+❓ **Help:** `/help`
+
+**Features:**
+- Store files in Wasabi cloud storage
+- Generate 24-hour shareable links
+- Organize files by user
+- Support for large files
+    """
+    
+    await message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
 if __name__ == "__main__":
     print("Starting Wasabi Storage Bot...")
