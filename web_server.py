@@ -36,7 +36,7 @@ s3_client = boto3.client(
 )
 
 # Flask app
-app = Flask(__name__, template_folder="templates", static_folder="static")
+app = Flask(__name__, template_folder="templates")
 
 # Media extensions for classification
 MEDIA_EXTENSIONS = {
@@ -85,7 +85,7 @@ def player(media_type, encoded_url):
 @app.route("/browse")
 def browse_files():
     """File browser interface"""
-    return render_template("browse.html")
+    return render_template("index.html")
 
 @app.route("/api/files")
 def list_files():
