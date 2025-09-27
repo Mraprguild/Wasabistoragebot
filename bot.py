@@ -39,10 +39,10 @@ WASABI_SECRET_KEY = os.getenv("WASABI_SECRET_KEY")
 WASABI_BUCKET = os.getenv("WASABI_BUCKET")
 WASABI_REGION = os.getenv("WASABI_REGION", "us-east-1")
 RENDER_URL = os.getenv("RENDER_URL", "http://localhost:8000")
-MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024  # 10GB
+MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
 
 # Performance tuning
-CHUNK_SIZE = 64 * 1024 * 1024  # 64MB chunks for large files
+CHUNK_SIZE = 1024 * 1024 * 1024  # 64MB chunks for large files
 MAX_WORKERS = 4  # Concurrent upload/download threads
 BUFFER_SIZE = 8192 * 8  # 64KB buffer for file operations
 
@@ -341,7 +341,7 @@ async def start_command(client, message: Message):
     await message.reply_text(
         "⚡ **ULTRA HIGH-SPEED CLOUD STORAGE BOT** ⚡\n\n"
         "✨ **Features:**\n"
-        "• 🚀 **10GB File Support** - Massive uploads/downloads\n"
+        "• 🚀 **2GB File Support** - Massive uploads/downloads\n"
         "• ⚡ **Multi-threaded Transfers** - Maximum speed\n"
         "• 💾 **Memory Optimized** - Efficient large file handling\n"
         "• 🌐 **Web Player Integration** - Instant media playback\n"
