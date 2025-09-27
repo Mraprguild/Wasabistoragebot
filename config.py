@@ -1,29 +1,27 @@
-# config.py
 import os
-from dotenv import load_dotenv
+from dataclasses import dataclass
 
-# Load environment variables from a .env file if it exists
-load_dotenv()
-
+@dataclass
 class Config:
-    """
-    Configuration class to hold all environment variables.
-    """
-    # Telegram Bot Configuration
-    API_ID = int(os.environ.get("API_ID", 0))
-    API_HASH = os.environ.get("API_HASH")
-    BOT_TOKEN = os.environ.get("BOT_TOKEN")
+    # Telegram API credentials
+    API_ID: int = int(os.getenv("API_ID", 0))
+    API_HASH: str = os.getenv("API_HASH", "")
+    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+    
+    # Wasabi S3 credentials
+    WASABI_ACCESS_KEY: str = os.getenv("WASABI_ACCESS_KEY", "")
+    WASABI_SECRET_KEY: str = os.getenv("WASABI_SECRET_KEY", "")
+    WASABI_BUCKET: str = os.getenv("WASABI_BUCKET", "")
+    WASABI_REGION: str = os.getenv("WASABI_REGION", "us-east-1")
+    
+    # Bot settings
+    MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", 2147483648))  # 2GB default
+    ALLOWED_EXTENSIONS: list = None
+    
+    def __post_init__(self):
+        if self.ALLOWED_EXTENSIONS is None:
+            self.ALLOWED_EXTENSIONS = ['.mp4', '.avi', '.mov', '.mkv', '.pdf', 
+                                     '.doc', '.docx', '.zip', '.rar', '.7z']
 
-    # Wasabi Configuration
-    WASABI_ACCESS_KEY = os.environ.get("WASABI_ACCESS_KEY")
-    WASABI_SECRET_KEY = os.environ.get("WASABI_SECRET_KEY")
-    WASABI_BUCKET = os.environ.get("WASABI_BUCKET")
-    WASABI_REGION = os.environ.get("WASABI_REGION", "us-east-1") # Default region if not set
-
-# Instantiate the config
+# Create config instance
 config = Config()
-
-# Basic validation to ensure essential variables are set
-if not all([config.API_ID, config.API_HASH, config.BOT_TOKEN, config.WASABI_ACCESS_KEY, config.WASABI_SECRET_KEY, config.WASABI_BUCKET]):
-    raise ValueError("One or more essential environment variables are missing. Please check your .env file or environment.")
-
