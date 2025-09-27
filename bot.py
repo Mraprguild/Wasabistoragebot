@@ -1,470 +1,418 @@
 import os
-import time
 import asyncio
-import math
-import boto3
-import threading
-from botocore.exceptions import NoCredentialsError, ClientError
-from config import config
+import logging
+from typing import Dict, List, Tuple
+from datetime import datetime
+import time
+
+# Third-party imports
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait
+import tgcrypto
+import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
 
-# Validate configuration
-try:
-    config.validate()
-    print("✓ Configuration validated successfully")
-except ValueError as e:
-    print(f"✗ Configuration error: {e}")
-    exit(1)
-
-# Bot initialization
-app = Client(
-    "wasabi_bot",
-    api_id=config.API_ID,
-    api_hash=config.API_HASH,
-    bot_token=config.BOT_TOKEN
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger(__name__)
 
-# --- Boto3 S3 Client Setup ---
-def create_s3_client(access_key, secret_key, region):
-    """Create S3 client with error handling"""
-    try:
-        return boto3.client(
+# Environment variables
+class Config:
+    # Telegram
+    API_ID = int(os.getenv("API_ID"))
+    API_HASH = os.getenv("API_HASH")
+    BOT_TOKEN = os.getenv("BOT_TOKEN")
+    
+    # Wasabi Primary Server
+    WASABI_ACCESS_KEY_1 = os.getenv("WASABI_ACCESS_KEY_1")
+    WASABI_SECRET_KEY_1 = os.getenv("WASABI_SECRET_KEY_1")
+    WASABI_BUCKET_1 = os.getenv("WASABI_BUCKET_1")
+    WASABI_REGION_1 = os.getenv("WASABI_REGION_1", "us-east-1")
+    
+    # Wasabi Secondary Server
+    WASABI_ACCESS_KEY_2 = os.getenv("WASABI_ACCESS_KEY_2")
+    WASABI_SECRET_KEY_2 = os.getenv("WASABI_SECRET_KEY_2")
+    WASABI_BUCKET_2 = os.getenv("WASABI_BUCKET_2")
+    WASABI_REGION_2 = os.getenv("WASABI_REGION_2", "us-east-1")
+    
+    # Bot settings
+    MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024  # 10GB
+    DOWNLOAD_URL_EXPIRY = 3600  # 1 hour
+
+# Wasabi Storage Manager
+class WasabiStorageManager:
+    def __init__(self):
+        self.clients = self._initialize_clients()
+        self.buckets = [Config.WASABI_BUCKET_1, Config.WASABI_BUCKET_2]
+        
+    def _initialize_clients(self) -> List:
+        """Initialize both Wasabi S3 clients"""
+        clients = []
+        
+        # Client 1 configuration
+        s3_config_1 = Config(
+            region_name=Config.WASABI_REGION_1,
+            retries={'max_attempts': 3, 'mode': 'standard'},
+            s3={'addressing_style': 'virtual'}
+        )
+        
+        client1 = boto3.client(
             's3',
-            endpoint_url=f'https://s3.{region}.wasabisys.com',
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            region_name=region,
-            config=boto3.session.Config(
-                retries={'max_attempts': 3},
-                connect_timeout=30,
-                read_timeout=30
-            )
+            aws_access_key_id=Config.WASABI_ACCESS_KEY_1,
+            aws_secret_access_key=Config.WASABI_SECRET_KEY_1,
+            endpoint_url=f'https://s3.{Config.WASABI_REGION_1}.wasabisys.com',
+            config=s3_config_1
         )
-    except Exception as e:
-        print(f"Error creating S3 client: {e}")
-        return None
-
-# Setup for Server 1
-s3_client_1 = create_s3_client(
-    config.WASABI_ACCESS_KEY_1, 
-    config.WASABI_SECRET_KEY_1, 
-    config.WASABI_REGION_1
-)
-
-# Setup for Server 2 (if configured)
-s3_client_2 = None
-if all([config.WASABI_ACCESS_KEY_2, config.WASABI_SECRET_KEY_2, 
-         config.WASABI_BUCKET_2, config.WASABI_REGION_2]):
-    s3_client_2 = create_s3_client(
-        config.WASABI_ACCESS_KEY_2, 
-        config.WASABI_SECRET_KEY_2, 
-        config.WASABI_REGION_2
-    )
-    print("✓ Secondary Wasabi server configured")
-else:
-    print("ℹ Secondary Wasabi server not configured")
-
-# --- Helper Functions ---
-def humanbytes(size):
-    """Converts bytes to a human-readable format."""
-    if not size or size == 0:
-        return "0B"
-    power = 1024
-    power_dict = {0: "B", 1: "KB", 2: "MB", 3: "GB", 4: "TB", 5: "PB"}
-    
-    for i in range(len(power_dict)):
-        if size < power ** (i + 1) or i == len(power_dict) - 1:
-            return f"{size / (power ** i):.2f} {power_dict[i]}"
-    return f"{size:.2f} B"
-
-def human_time(seconds):
-    """Convert seconds to human readable time format"""
-    if seconds < 60:
-        return f"{seconds:.1f}s"
-    elif seconds < 3600:
-        return f"{seconds / 60:.1f}m"
-    else:
-        return f"{seconds / 3600:.1f}h"
-
-class ProgressTracker:
-    """Thread-safe progress tracker for uploads"""
-    def __init__(self, total_size, message, action):
-        self.total_size = total_size
-        self.message = message
-        self.action = action
-        self.start_time = time.time()
-        self.transferred = 0
-        self.lock = threading.Lock()
-        self.last_update_time = self.start_time
-        self.last_update_size = 0
+        clients.append(client1)
         
-    def update(self, bytes_transferred):
-        with self.lock:
-            self.transferred = bytes_transferred
-            
-    async def get_progress_text(self):
-        with self.lock:
-            current = self.transferred
-            total = self.total_size
-            now = time.time()
-            elapsed = now - self.start_time
-            
-            if elapsed == 0:
-                return ""
+        # Client 2 configuration
+        s3_config_2 = Config(
+            region_name=Config.WASABI_REGION_2,
+            retries={'max_attempts': 3, 'mode': 'standard'},
+            s3={'addressing_style': 'virtual'}
+        )
+        
+        client2 = boto3.client(
+            's3',
+            aws_access_key_id=Config.WASABI_ACCESS_KEY_2,
+            aws_secret_access_key=Config.WASABI_SECRET_KEY_2,
+            endpoint_url=f'https://s3.{Config.WASABI_REGION_2}.wasabisys.com',
+            config=s3_config_2
+        )
+        clients.append(client2)
+        
+        return clients
+    
+    async def upload_file(self, file_path: str, object_name: str) -> Tuple[bool, str, int]:
+        """Upload file to both Wasabi servers simultaneously"""
+        file_size = os.path.getsize(file_path)
+        server_choice = hash(object_name) % 2  # Distribute files between servers
+        
+        try:
+            # Upload to primary server
+            def _upload_to_server(client_idx):
+                client = self.clients[client_idx]
+                bucket = self.buckets[client_idx]
                 
-            percentage = (current / total) * 100 if total > 0 else 0
-            speed = current / elapsed
+                client.upload_file(
+                    file_path,
+                    bucket,
+                    object_name,
+                    Callback=ProgressCallback(file_size, f"Server {client_idx + 1}")
+                )
+                return True
             
-            # Calculate ETA
-            if current > 0 and speed > 0:
-                remaining = total - current
-                eta = remaining / speed
-                eta_text = f"**ETA:** `{human_time(eta)}`"
+            # Start uploads to both servers concurrently
+            loop = asyncio.get_event_loop()
+            tasks = []
+            
+            # Upload to primary server (main storage)
+            task1 = loop.run_in_executor(None, _upload_to_server, server_choice)
+            tasks.append(task1)
+            
+            # Upload to secondary server (backup)
+            task2 = loop.run_in_executor(None, _upload_to_server, 1 - server_choice)
+            tasks.append(task2)
+            
+            # Wait for both uploads to complete
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Check if both uploads were successful
+            success = all(isinstance(result, bool) and result for result in results)
+            
+            if success:
+                return True, object_name, file_size
             else:
-                eta_text = "**ETA:** `Calculating...`"
-            
-            progress_bar = "[{0}{1}]".format(
-                '█' * int(math.floor(percentage / 5)),  # 20 segments for better granularity
-                '░' * (20 - int(math.floor(percentage / 5)))
-            )
-            
-            progress_text = (
-                f"**{self.action}**\n"
-                f"{progress_bar} {percentage:.1f}%\n"
-                f"**Progress:** `{humanbytes(current)} / {humanbytes(total)}`\n"
-                f"**Speed:** `{humanbytes(speed)}/s`\n"
-                f"**Elapsed:** `{human_time(elapsed)}`\n"
-                f"{eta_text}"
-            )
-            
-            return progress_text
-
-async def safe_edit_message(message, text):
-    """Safely edit message with flood wait handling"""
-    try:
-        await message.edit_text(text)
-        return True
-    except FloodWait as e:
-        print(f"Flood wait: Waiting {e.value} seconds")
-        await asyncio.sleep(e.value)
-        return await safe_edit_message(message, text)
-    except Exception as e:
-        print(f"Error editing message: {e}")
-        return False
-
-async def upload_file_with_progress(s3_client, file_path, bucket_name, key, progress_tracker):
-    """Upload file with progress tracking"""
-    try:
-        # Use boto3's upload_file with custom callback
-        s3_client.upload_file(
-            file_path,
-            bucket_name,
-            key,
-            Callback=lambda bytes_transferred: progress_tracker.update(bytes_transferred)
-        )
-        return True
-    except Exception as e:
-        print(f"Upload error: {e}")
-        return False
-
-async def progress_updater(progress_tracker, message, update_interval=2):
-    """Update progress message periodically"""
-    last_percentage = 0
-    
-    while progress_tracker.transferred < progress_tracker.total_size:
-        current_percentage = (progress_tracker.transferred / progress_tracker.total_size) * 100
-        
-        # Only update if progress has changed significantly (1% or 2 seconds passed)
-        if (abs(current_percentage - last_percentage) >= 1 or 
-            time.time() - progress_tracker.last_update_time >= update_interval):
-            
-            progress_text = await progress_tracker.get_progress_text()
-            if progress_text:
-                await safe_edit_message(message, progress_text)
-                last_percentage = current_percentage
-                progress_tracker.last_update_time = time.time()
-        
-        await asyncio.sleep(0.5)  # Small delay to prevent excessive updates
-    
-    # Final update
-    progress_text = await progress_tracker.get_progress_text()
-    await safe_edit_message(message, progress_text)
-
-# --- Bot Handlers ---
-@app.on_message(filters.command("start"))
-async def start_command(client, message):
-    """Handle /start command"""
-    welcome_text = (
-        "🚀 **Wasabi Upload Bot**\n\n"
-        "Send me any file (document, video, or audio) and I'll upload it to Wasabi storage.\n\n"
-        "**Features:**\n"
-        "• Fast multi-server uploads\n"
-        "• Real-time progress tracking\n"
-        "• Direct streaming links\n"
-        "• 7-day pre-signed URLs\n\n"
-        "Just send a file to get started!"
-    )
-    await message.reply_text(welcome_text)
-
-@app.on_message(filters.command("status"))
-async def status_command(client, message):
-    """Check bot and server status"""
-    status_text = "🔍 **Bot Status**\n\n"
-    
-    # Check Server 1
-    try:
-        s3_client_1.head_bucket(Bucket=config.WASABI_BUCKET_1)
-        status_text += "✅ **Server 1:** Connected and working\n"
-    except Exception as e:
-        status_text += f"❌ **Server 1:** Error - {str(e)}\n"
-    
-    # Check Server 2 if configured
-    if s3_client_2:
-        try:
-            s3_client_2.head_bucket(Bucket=config.WASABI_BUCKET_2)
-            status_text += "✅ **Server 2:** Connected and working\n"
+                logger.error(f"Upload failed for {object_name}")
+                return False, "", 0
+                
         except Exception as e:
-            status_text += f"❌ **Server 2:** Error - {str(e)}\n"
-    else:
-        status_text += "⚪ **Server 2:** Not configured\n"
+            logger.error(f"Upload error: {str(e)}")
+            return False, "", 0
     
-    await message.reply_text(status_text)
-
-@app.on_message(filters.document | filters.video | filters.audio | filters.photo)
-async def handle_file(client, message: Message):
-    """Handle incoming files and show server selection"""
-    # Get file info
-    if message.document:
-        file = message.document
-    elif message.video:
-        file = message.video
-    elif message.audio:
-        file = message.audio
-    elif message.photo:
-        file = message.photo
-    else:
-        await message.reply_text("❌ Unsupported file type")
-        return
-    
-    file_name = getattr(file, "file_name", "Unknown")
-    file_size = humanbytes(file.file_size)
-    
-    # Create server selection buttons
-    buttons = [
-        [InlineKeyboardButton("📤 Server 1", callback_data=f"upload_1_{message.id}")],
-    ]
-    
-    if s3_client_2:
-        buttons.append([InlineKeyboardButton("📤 Server 2", callback_data=f"upload_2_{message.id}")])
-    
-    keyboard = InlineKeyboardMarkup(buttons)
-    
-    info_text = (
-        f"📄 **File Info**\n"
-        f"**Name:** `{file_name}`\n"
-        f"**Size:** `{file_size}`\n\n"
-        f"Select a server to upload to:"
-    )
-    
-    await message.reply_text(info_text, reply_markup=keyboard)
-
-@app.on_callback_query(filters.regex("^upload_"))
-async def upload_callback(client, callback_query):
-    """Handle server selection and start upload process"""
-    await callback_query.answer()
-    
-    try:
-        parts = callback_query.data.split("_")
-        server_choice = int(parts[1])
-        message_id = int(parts[2])
-        
-        # Get the original message
-        original_message = await client.get_messages(
-            callback_query.message.chat.id,
-            message_id
-        )
-        
-        if not original_message:
-            await callback_query.message.edit_text("❌ Original message not found")
-            return
-        
-        # Determine which server to use
-        if server_choice == 1:
-            s3_client, bucket_name, region = s3_client_1, config.WASABI_BUCKET_1, config.WASABI_REGION_1
-            server_name = "Server 1"
-        elif server_choice == 2 and s3_client_2:
-            s3_client, bucket_name, region = s3_client_2, config.WASABI_BUCKET_2, config.WASABI_REGION_2
-            server_name = "Server 2"
-        else:
-            await callback_query.message.edit_text("❌ Selected server is not available")
-            return
-        
-        if not s3_client:
-            await callback_query.message.edit_text("❌ Server connection error")
-            return
-        
-        # Get file info
-        file_obj = (original_message.document or original_message.video or 
-                   original_message.audio or original_message.photo)
-        
-        if not file_obj:
-            await callback_query.message.edit_text("❌ No file found in message")
-            return
-        
-        file_size = file_obj.file_size
-        file_name = getattr(file_obj, "file_name", f"file_{original_message.id}")
-        
-        await callback_query.message.edit_text(f"📥 **Downloading from Telegram...**\n\n**File:** `{file_name}`\n**Server:** `{server_name}`")
-        
-        # Download file
-        download_path = None
-        try:
-            download_start_time = time.time()
-            download_path = await original_message.download(
-                file_name=file_name,
-                progress=lambda current, total: asyncio.create_task(
-                    update_download_progress(callback_query.message, current, total, download_start_time, file_name)
+    async def generate_download_url(self, object_name: str, original_filename: str) -> str:
+        """Generate pre-signed download URL from available server"""
+        for i, (client, bucket) in enumerate(zip(self.clients, self.buckets)):
+            try:
+                url = client.generate_presigned_url(
+                    'get_object',
+                    Params={
+                        'Bucket': bucket,
+                        'Key': object_name,
+                        'ResponseContentDisposition': f'attachment; filename="{original_filename}"'
+                    },
+                    ExpiresIn=Config.DOWNLOAD_URL_EXPIRY
                 )
+                return url
+            except ClientError as e:
+                logger.warning(f"Server {i+1} failed: {e}, trying next server")
+                continue
+        
+        raise Exception("All Wasabi servers are unavailable")
+    
+    async def delete_file(self, object_name: str):
+        """Delete file from both servers"""
+        tasks = []
+        loop = asyncio.get_event_loop()
+        
+        for i, (client, bucket) in enumerate(zip(self.clients, self.buckets)):
+            task = loop.run_in_executor(
+                None, 
+                lambda c=client, b=bucket: c.delete_object(Bucket=b, Key=object_name)
             )
-        except Exception as e:
-            await callback_query.message.edit_text(f"❌ Download failed: {str(e)}")
+            tasks.append(task)
+        
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+# Progress callback class
+class ProgressCallback:
+    def __init__(self, total_size: int, server_name: str):
+        self.total_size = total_size
+        self.server_name = server_name
+        self.uploaded = 0
+        self.start_time = time.time()
+    
+    def __call__(self, bytes_amount):
+        self.uploaded += bytes_amount
+        if self.total_size == 0:
             return
         
-        if not download_path or not os.path.exists(download_path):
-            await callback_query.message.edit_text("❌ Download failed: File not found")
-            return
+        percentage = (self.uploaded / self.total_size) * 100
+        elapsed_time = time.time() - self.start_time
+        speed = self.uploaded / elapsed_time if elapsed_time > 0 else 0
         
-        # Upload to Wasabi
-        await callback_query.message.edit_text(f"📤 **Uploading to {server_name}...**\n\n**File:** `{file_name}`")
+        logger.info(
+            f"{self.server_name}: {percentage:.1f}% - "
+            f"{self._human_readable_size(self.uploaded)}/"
+            f"{self._human_readable_size(self.total_size)} - "
+            f"{self._human_readable_size(speed)}/s"
+        )
+    
+    @staticmethod
+    def _human_readable_size(size_bytes):
+        if size_bytes == 0:
+            return "0B"
+        units = ['B', 'KB', 'MB', 'GB', 'TB']
+        import math
+        unit_index = int(math.floor(math.log(size_bytes, 1024)))
+        size = round(size_bytes / math.pow(1024, unit_index), 2)
+        return f"{size} {units[unit_index]}"
+
+# Telegram Bot
+class TelegramWasabiBot:
+    def __init__(self):
+        self.app = Client(
+            "wasabi_bot",
+            api_id=Config.API_ID,
+            api_hash=Config.API_HASH,
+            bot_token=Config.BOT_TOKEN
+        )
+        self.storage = WasabiStorageManager()
+        self.user_sessions = {}
         
-        try:
-            # Create progress tracker
-            progress_tracker = ProgressTracker(file_size, callback_query.message, f"Uploading to {server_name}")
-            
-            # Start progress updates
-            progress_task = asyncio.create_task(
-                progress_updater(progress_tracker, callback_query.message)
-            )
-            
-            # Start upload
-            upload_success = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: upload_file_with_progress(
-                    s3_client, download_path, bucket_name, file_name, progress_tracker
+        # Register handlers
+        self.register_handlers()
+    
+    def register_handlers(self):
+        @self.app.on_message(filters.command("start"))
+        async def start_command(client, message: Message):
+            welcome_text = """
+🤖 **Welcome to High-Speed File Storage Bot!**
+
+**Features:**
+✅ **10GB File Support** - Upload large files up to 10GB
+✅ **High-Speed Transfer** - Fast upload/download with dual servers
+✅ **Any File Format** - Support all file types
+✅ **Streaming Links** - Direct play in MX Player, VLC, etc.
+✅ **Dual Wasabi Storage** - Redundant storage for reliability
+
+**How to use:**
+1. Send me any file (document, video, audio, etc.)
+2. I'll upload it to secure Wasabi storage
+3. Get a direct download/streaming link
+
+**Supported Players:** MX Player, VLC, PotPlayer, and more!
+            """
+            await message.reply_text(welcome_text)
+        
+        @self.app.on_message(filters.document | filters.video | filters.audio)
+        async def handle_files(client, message: Message):
+            try:
+                # Check file size
+                file_size = message.document.file_size if message.document else \
+                           message.video.file_size if message.video else \
+                           message.audio.file_size
+                
+                if file_size > Config.MAX_FILE_SIZE:
+                    await message.reply_text(
+                        f"❌ File size exceeds 10GB limit. "
+                        f"Your file: {file_size / (1024**3):.1f}GB"
+                    )
+                    return
+                
+                # Inform user
+                status_msg = await message.reply_text("📥 Downloading file from Telegram...")
+                
+                # Download file
+                file_path = await self.download_telegram_file(message)
+                if not file_path:
+                    await status_msg.edit_text("❌ Failed to download file from Telegram")
+                    return
+                
+                await status_msg.edit_text("🔄 Uploading to Wasabi storage (dual servers)...")
+                
+                # Generate unique object name
+                file_ext = os.path.splitext(file_path)[1]
+                object_name = f"{int(time.time())}_{message.from_user.id}{file_ext}"
+                original_filename = message.document.file_name if message.document else \
+                                  f"file{file_ext}"
+                
+                # Upload to Wasabi
+                success, stored_name, size = await self.storage.upload_file(
+                    file_path, object_name
                 )
+                
+                if success:
+                    await status_msg.edit_text("🔗 Generating download link...")
+                    
+                    # Generate download URL
+                    download_url = await self.storage.generate_download_url(
+                        stored_name, original_filename
+                    )
+                    
+                    # Create streaming links for players
+                    streaming_info = self._generate_streaming_info(download_url, original_filename)
+                    
+                    # Send success message with links
+                    response_text = self._create_success_message(
+                        original_filename, size, download_url, streaming_info
+                    )
+                    
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📥 Direct Download", url=download_url)],
+                        [InlineKeyboardButton("🎬 MX Player", url=streaming_info['mx_player'])],
+                        [InlineKeyboardButton("📺 VLC Player", url=streaming_info['vlc_player'])]
+                    ])
+                    
+                    await status_msg.edit_text(response_text, reply_markup=keyboard)
+                    
+                else:
+                    await status_msg.edit_text("❌ Upload failed. Please try again.")
+                
+                # Cleanup local file
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+                    
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                await self.handle_files(client, message)
+            except Exception as e:
+                logger.error(f"Error handling file: {str(e)}")
+                await message.reply_text("❌ An error occurred. Please try again.")
+    
+    async def download_telegram_file(self, message: Message) -> str:
+        """Download file from Telegram with progress"""
+        try:
+            if message.document:
+                file_id = message.document.file_id
+                file_name = message.document.file_name
+            elif message.video:
+                file_id = message.video.file_id
+                file_name = f"video_{int(time.time())}.mp4"
+            elif message.audio:
+                file_id = message.audio.file_id
+                file_name = f"audio_{int(time.time())}.mp3"
+            else:
+                return None
+            
+            # Create downloads directory
+            os.makedirs("downloads", exist_ok=True)
+            file_path = f"downloads/{file_name}"
+            
+            # Download with progress
+            file = await message.download(
+                file_name=file_path,
+                progress=self._download_progress,
+                progress_args=(message, "📥 Downloading...")
             )
             
-            # Wait for progress updates to finish
-            progress_tracker.transferred = file_size  # Force completion
-            await asyncio.sleep(1)  # Let final update happen
-            
-            if not upload_success:
-                await callback_query.message.edit_text("❌ Upload failed")
-                if os.path.exists(download_path):
-                    os.remove(download_path)
-                return
-            
-            # Generate links
-            stream_link = f"https://s3.{region}.wasabisys.com/{bucket_name}/{file_name}"
-            
-            presigned_url = s3_client.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': bucket_name, 'Key': file_name},
-                ExpiresIn=604800  # 7 days
-            )
-            
-            success_text = (
-                f"✅ **Upload Successful!**\n\n"
-                f"**File:** `{file_name}`\n"
-                f"**Server:** `{server_name}`\n"
-                f"**Size:** `{humanbytes(file_size)}`\n\n"
-                f"**🌐 Direct Stream Link:**\n`{stream_link}`\n\n"
-                f"**🔗 Pre-signed URL (7 days):**\n`{presigned_url}`"
-            )
-            
-            await callback_query.message.edit_text(success_text)
+            return file_path if file else None
             
         except Exception as e:
-            await callback_query.message.edit_text(f"❌ Upload error: {str(e)}")
+            logger.error(f"Download error: {str(e)}")
+            return None
+    
+    async def _download_progress(self, current, total, message, text):
+        """Progress callback for download"""
+        # You can implement progress updates here
+        pass
+    
+    def _generate_streaming_info(self, download_url: str, filename: str) -> Dict:
+        """Generate streaming URLs for various players"""
+        return {
+            'mx_player': f"intent:{download_url}#Intent;package=com.mxtech.videoplayer.ad;end",
+            'vlc_player': f"vlc://{download_url}",
+            'direct_stream': download_url
+        }
+    
+    def _create_success_message(self, filename: str, size: int, 
+                              download_url: str, streaming_info: Dict) -> str:
+        """Create success message with file info"""
+        size_mb = size / (1024 * 1024)
+        size_gb = size / (1024 * 1024 * 1024)
         
-        finally:
-            # Cleanup
-            if download_path and os.path.exists(download_path):
-                os.remove(download_path)
-    
-    except Exception as e:
-        await callback_query.message.edit_text(f"❌ Error: {str(e)}")
-
-async def update_download_progress(message, current, total, start_time, file_name):
-    """Update download progress"""
-    if total == 0:
-        return
+        size_text = f"{size_mb:.1f} MB" if size_mb < 1024 else f"{size_gb:.1f} GB"
         
-    percentage = (current / total) * 100
-    elapsed = time.time() - start_time
-    speed = current / elapsed if elapsed > 0 else 0
-    
-    progress_text = (
-        f"📥 **Downloading...**\n\n"
-        f"**File:** `{file_name}`\n"
-        f"**Progress:** `{humanbytes(current)} / {humanbytes(total)}`\n"
-        f"**Speed:** `{humanbytes(speed)}/s`\n"
-        f"**Completed:** `{percentage:.1f}%`"
-    )
-    
-    try:
-        await message.edit_text(progress_text)
-    except Exception:
-        pass  # Ignore edit errors during rapid updates
+        return f"""
+✅ **File Uploaded Successfully!**
 
-@app.on_message(filters.command("help"))
-async def help_command(client, message):
-    """Show help information"""
-    help_text = (
-        "🤖 **Wasabi Upload Bot Help**\n\n"
-        "**Commands:**\n"
-        "• `/start` - Start the bot\n"
-        "• `/status` - Check server status\n"
-        "• `/help` - Show this help message\n\n"
-        "**How to use:**\n"
-        "1. Send any file (document, video, audio, photo)\n"
-        "2. Choose your preferred server\n"
-        "3. Wait for upload to complete\n"
-        "4. Get your streaming links!\n\n"
-        "**Supported files:** Documents, Videos, Audio, Photos"
-    )
-    await message.reply_text(help_text)
+📁 **Filename:** `{filename}`
+💾 **Size:** {size_text}
+⏰ **Link Expires:** 1 hour
 
-# --- Main Application ---
-async def main():
-    """Main application entry point"""
-    print("🚀 Starting Wasabi Upload Bot...")
+**Download Options:**
+• 📥 Direct Download
+• 🎬 MX Player (Android)
+• 📺 VLC Player
+• 🌐 Any media player
+
+**Direct URL:**
+`{download_url}`
+        """
     
-    try:
-        await app.start()
-        print("✅ Bot started successfully!")
-        
-        # Get bot info
-        me = await app.get_me()
-        print(f"🤖 Bot: @{me.username}")
-        print(f"🆔 ID: {me.id}")
-        print("📝 Send a file to the bot to test uploads")
+    async def run(self):
+        """Start the bot"""
+        logger.info("Starting Telegram Wasabi Bot...")
+        await self.app.start()
+        logger.info("Bot started successfully!")
         
         # Keep the bot running
         await asyncio.Event().wait()
-        
-    except Exception as e:
-        print(f"❌ Error starting bot: {e}")
-    finally:
-        await app.stop()
-        print("🛑 Bot stopped")
+
+# Main execution
+async def main():
+    # Validate environment variables
+    required_vars = [
+        "API_ID", "API_HASH", "BOT_TOKEN",
+        "WASABI_ACCESS_KEY_1", "WASABI_SECRET_KEY_1", "WASABI_BUCKET_1",
+        "WASABI_ACCESS_KEY_2", "WASABI_SECRET_KEY_2", "WASABI_BUCKET_2"
+    ]
+    
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    if missing_vars:
+        logger.error(f"Missing environment variables: {', '.join(missing_vars)}")
+        return
+    
+    # Initialize and run bot
+    bot = TelegramWasabiBot()
+    await bot.run()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n🛑 Bot interrupted by user")
-    except Exception as e:
-        print(f"❌ Fatal error: {e}")
+    asyncio.run(main())
