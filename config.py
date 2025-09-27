@@ -1,27 +1,21 @@
 import os
-from dataclasses import dataclass
+from dotenv import load_dotenv
 
-@dataclass
-class Config:
-    # Telegram API credentials
-    API_ID: int = int(os.getenv("API_ID", 0))
-    API_HASH: str = os.getenv("API_HASH", "")
-    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
-    
-    # Wasabi S3 credentials
-    WASABI_ACCESS_KEY: str = os.getenv("WASABI_ACCESS_KEY", "")
-    WASABI_SECRET_KEY: str = os.getenv("WASABI_SECRET_KEY", "")
-    WASABI_BUCKET: str = os.getenv("WASABI_BUCKET", "")
-    WASABI_REGION: str = os.getenv("WASABI_REGION", "us-east-1")
-    
-    # Bot settings
-    MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", 2147483648))  # 2GB default
-    ALLOWED_EXTENSIONS: list = None
-    
-    def __post_init__(self):
-        if self.ALLOWED_EXTENSIONS is None:
-            self.ALLOWED_EXTENSIONS = ['.mp4', '.avi', '.mov', '.mkv', '.pdf', 
-                                     '.doc', '.docx', '.zip', '.rar', '.7z']
+# Load environment variables from .env file
+load_dotenv()
 
-# Create config instance
-config = Config()
+# --- Telegram Bot ---
+API_ID = int(os.getenv("API_ID", "1234567"))
+API_HASH = os.getenv("API_HASH", "your_api_hash")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "your_bot_token")
+ADMIN_ID = os.environ.get("ADMIN_ID")
+
+# --- Wasabi Storage ---
+WASABI_ACCESS_KEY = os.getenv("WASABI_ACCESS_KEY", "your_wasabi_access_key")
+WASABI_SECRET_KEY = os.getenv("WASABI_SECRET_KEY", "your_wasabi_secret_key")
+WASABI_BUCKET = os.getenv("WASABI_BUCKET", "your-bucket-name")
+WASABI_REGION = os.getenv("WASABI_REGION", "ap-northeast-1")  
+WASABI_ENDPOINT_URL = os.getenv("WASABI_ENDPOINT_URL", "https://s3.wasabisys.com")
+
+# Welcome image URL (you can replace this with your own image)
+WELCOME_IMAGE_URL = "https://raw.githubusercontent.com/Mraprguild8133/Telegramstorage-/refs/heads/main/IMG-20250915-WA0013.jpg"
