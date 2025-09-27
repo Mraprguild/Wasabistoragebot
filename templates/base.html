@@ -3,47 +3,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Wasabi Storage Bot{% endblock %}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <title>Wasabi Cloud Storage Bot</title>
     <style>
-        .navbar-brand { font-weight: bold; }
-        .file-icon { width: 24px; text-align: center; }
-        .progress-bar { transition: width 0.3s ease; }
-        .media-player { max-width: 100%; border-radius: 10px; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f8fa;
+            color: #333;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .feature-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        .feature-list li {
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .feature-list li:last-child {
+            border-bottom: none;
+        }
+        .btn {
+            display: inline-block;
+            background: #0088cc;
+            color: white;
+            padding: 12px 25px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            margin: 10px 5px;
+        }
+        .btn:hover {
+            background: #006699;
+        }
+        .telegram-btn {
+            background: #0088cc;
+        }
+        .github-btn {
+            background: #333;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #666;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-        <div class="container">
-            <a class="navbar-brand" href="/">
-                <i class="fas fa-cloud-upload-alt"></i> Wasabi Storage Bot
-            </a>
-        </div>
-    </nav>
-
-    <div class="container mt-4">
-        {% with messages = get_flashed_messages() %}
-            {% if messages %}
-                {% for message in messages %}
-                    <div class="alert alert-info alert-dismissible fade show" role="alert">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-
-        {% block content %}{% endblock %}
+    <div class="header">
+        <h1>🚀 Wasabi Cloud Storage Bot</h1>
+        <p>Upload, store, and share your files with ease</p>
     </div>
 
-    <footer class="bg-light text-center text-muted py-4 mt-5">
-        <div class="container">
-            <p>&copy; 2024 Wasabi Storage Bot. Powered by Pyrogram & Flask.</p>
-        </div>
-    </footer>
+    <div class="card">
+        <h2>📁 About This Service</h2>
+        <p>This bot allows you to upload files to Wasabi cloud storage directly from Telegram and access them through a web interface.</p>
+        
+        <h3>✨ Features:</h3>
+        <ul class="feature-list">
+            <li>✅ Upload files up to 2GB</li>
+            <li>✅ Direct download links</li>
+            <li>✅ Web player for media files</li>
+            <li>✅ Secure cloud storage</li>
+            <li>✅ Easy file sharing</li>
+        </ul>
+    </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    {% block scripts %}{% endblock %}
+    <div class="card">
+        <h2>📲 Get Started</h2>
+        <p>Start using the bot by clicking the button below:</p>
+        <div style="text-align: center;">
+            <a href="https://t.me/{{ bot_username }}" class="btn telegram-btn">Open in Telegram</a>
+            {% if render_url %}
+            <a href="{{ render_url }}/player" class="btn">Media Player</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>Powered by Wasabi Cloud Storage • <a href="/about">About</a></p>
+    </div>
 </body>
 </html>
