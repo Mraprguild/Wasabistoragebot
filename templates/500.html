@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Error - Ultra Cloud Storage</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #333;
+        }
+
+        .error-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 50px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            max-width: 600px;
+            width: 90%;
+            margin: 20px;
+        }
+
+        .error-code {
+            font-size: 120px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 20px;
+            line-height: 1;
+        }
+
+        .error-title {
+            font-size: 32px;
+            margin-bottom: 15px;
+            color: #2d3748;
+        }
+
+        .error-message {
+            font-size: 18px;
+            color: #4a5568;
+            margin-bottom: 25px;
+            line-height: 1.6;
+        }
+
+        .error-details {
+            background: #fed7d7;
+            border-left: 4px solid #f56565;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: left;
+            border-radius: 5px;
+            font-size: 14px;
+            color: #742a2a;
+        }
+
+        .error-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+            animation: shake 0.5s ease-in-out infinite alternate;
+        }
+
+        @keyframes shake {
+            0% { transform: rotate(-5deg); }
+            100% { transform: rotate(5deg); }
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin: 30px 0;
+            flex-wrap: wrap;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 12px 25px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+        }
+
+        .primary {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white;
+            box-shadow: 0 10px 20px rgba(255, 107, 107, 0.3);
+        }
+
+        .secondary {
+            background: transparent;
+            color: #ff6b6b;
+            border: 2px solid #ff6b6b;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 30px rgba(255, 107, 107, 0.4);
+        }
+
+        .status-info {
+            background: #e2e8f0;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+
+        .tech-support {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .support-contact {
+            color: #ff6b6b;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .loading-bar {
+            width: 100%;
+            height: 4px;
+            background: #e2e8f0;
+            border-radius: 2px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+
+        .loading-progress {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6b6b, #ee5a24);
+            border-radius: 2px;
+            animation: loading 2s ease-in-out infinite;
+        }
+
+        @keyframes loading {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+
+        @media (max-width: 768px) {
+            .error-container {
+                padding: 30px 20px;
+            }
+            
+            .error-code {
+                font-size: 80px;
+            }
+            
+            .error-title {
+                font-size: 24px;
+            }
+            
+            .action-buttons {
+                flex-direction: column;
+            }
+            
+            .button {
+                width: 100%;
+                text-align: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-icon">🚨</div>
+        <div class="error-code">500</div>
+        <h1 class="error-title">Internal Server Error</h1>
+        <p class="error-message">
+            Something went wrong on our end. Our technical team has been notified and is working 
+            to fix the issue. Please try again in a few moments.
+        </p>
+
+        <div class="loading-bar">
+            <div class="loading-progress"></div>
+        </div>
+
+        <div class="error-details">
+            <strong>What you can do:</strong>
+            <ul style="margin: 10px 0; padding-left: 20px;">
+                <li>Refresh the page in a few minutes</li>
+                <li>Check your internet connection</li>
+                <li>Clear your browser cache</li>
+                <li>Try using a different browser</li>
+            </ul>
+        </div>
+
+        <div class="action-buttons">
+            <button class="button primary" onclick="window.location.reload()">
+                🔄 Refresh Page
+            </button>
+            <a href="/" class="button secondary">🏠 Go Home</a>
+            <button class="button secondary" onclick="history.back()">
+                ↩️ Go Back
+            </button>
+        </div>
+
+        <div class="status-info">
+            <strong>System Status:</strong> Our team is working on resolving the issue
+            <br>
+            <strong>Last Update:</strong> <span id="currentTime"></span>
+        </div>
+
+        <div class="tech-support">
+            <p>If the problem persists, please contact our support team:</p>
+            <a href="mailto:support@ultrastorage.com" class="support-contact">
+                📧 support@ultrastorage.com
+            </a>
+        </div>
+    </div>
+
+    <script>
+        // Update current time
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('currentTime').textContent = 
+                now.toLocaleTimeString() + ' • ' + now.toLocaleDateString();
+        }
+
+        // Auto-refresh after 30 seconds
+        let refreshCountdown = 30;
+        function startAutoRefresh() {
+            const countdownElement = document.createElement('div');
+            countdownElement.style.marginTop = '10px';
+            countdownElement.style.fontSize = '12px';
+            countdownElement.style.color = '#718096';
+            countdownElement.id = 'countdown';
+            document.querySelector('.status-info').appendChild(countdownElement);
+            
+            const countdownInterval = setInterval(() => {
+                refreshCountdown--;
+                document.getElementById('countdown').textContent = 
+                    `Auto-refresh in ${refreshCountdown} seconds...`;
+                
+                if (refreshCountdown <= 0) {
+                    clearInterval(countdownInterval);
+                    window.location.reload();
+                }
+            }, 1000);
+        }
+
+        // Add some interactive effects
+        document.addEventListener('DOMContentLoaded', function() {
+            updateTime();
+            startAutoRefresh();
+            
+            const container = document.querySelector('.error-container');
+            container.style.opacity = '0';
+            container.style.transform = 'scale(0.8)';
+            
+            setTimeout(() => {
+                container.style.transition = 'all 0.5s ease';
+                container.style.opacity = '1';
+                container.style.transform = 'scale(1)';
+            }, 100);
+
+            // Update time every minute
+            setInterval(updateTime, 60000);
+        });
+
+        // Try to check server status
+        async function checkServerStatus() {
+            try {
+                const response = await fetch('/health');
+                if (response.ok) {
+                    window.location.reload(); // Server is back up, reload
+                }
+            } catch (error) {
+                // Server still down, continue waiting
+                console.log('Server status: Still down');
+            }
+        }
+
+        // Check server status every 10 seconds
+        setInterval(checkServerStatus, 10000);
+    </script>
+</body>
+</html>
