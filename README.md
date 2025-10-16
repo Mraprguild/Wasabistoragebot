@@ -24,3 +24,5 @@ A powerful Telegram bot for managing your Wasabi Cloud Storage with ease. Upload
 ```bash
 git clone https://github.com/Mraprguild/Wasabistoragebot.git
 cd Wasabistoragebot
+pip install -r requirements.txt
+python bot.py
